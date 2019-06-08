@@ -1,3 +1,4 @@
+// author: 2017147594 하진호
 #define _CRT_SECURE_NO_WARNINGS
 #include <iostream>
 #include <vector>
@@ -9,17 +10,21 @@ using namespace std;
 int PageTableAlloc(int pid, int aid, int demand_page);
 int MemoryAccess(int pid, int aid, int replPolicy);
 int ReleaseFrame(int replPolicy);
+int UpdateReference(void);
 void PrintResult(int pid, int func, int aid, int demand_page, int total_process);
 
 vector<int> physical_memory(32, -1);	// 물리메모리 32개 프레임
 vector<vector<int>> page_table_aid;
 vector<vector<int>> page_table_valid;
 vector<vector<int>> page_table_frame;
+vector<vector<bool>> page_table_R;
+vector<vector<unsigned char>> reference_byte;
 map<int, int> aid_idx;					// pair(aid, idx)
 vector<vector<int>> aid_info;			// [0]: page, [1]: demand_page, [2]: valid, [3]: frame, [4]: pid
 queue<int> FIFOQ;						// used for FIFO policy
 deque<int> LRUQ;						// used for LRU policy
 int page_fault = 0;
+int time_interval;
 
 int main()
 {
@@ -35,9 +40,18 @@ int main()
 	page_table_aid.assign(total_process, vector<int>(64, -1));
 	page_table_valid.assign(total_process, vector<int>(64, -1));
 	page_table_frame.assign(total_process, vector<int>(64, -1));
+	page_table_R.assign(total_process, vector<bool>(64, 0));
+	reference_byte.assign(total_process, vector<unsigned char>(64, 0));
 
+	time_interval = 8;
 	// 명령어 N번 수행
 	while(N) {
+		time_interval--;
+		printf("time interval : %d\n", time_interval);
+		// 명령어 8개 실행마다 update reference byte & clear reference bit
+		if (time_interval == 7) {
+			UpdateReference();
+		}
 		scanf("%d %d %d", &pid, &func, &aid);			// 명령어 읽음
 		// function = 1 : 페이지 테이블 할당
 		if (func) {
@@ -52,8 +66,12 @@ int main()
 		// 결과 출력
 		PrintResult(pid, func, aid, demand_page, total_process);
 
+		if (!time_interval) {
+			time_interval = 8;
+		}
 		N--;
 	}
+	printf("page fault = %d\n", page_fault);
 
 	return 0;
 }
@@ -96,10 +114,15 @@ int MemoryAccess(int pid, int aid, int replPolicy)
 {
 	int idx = aid_idx.find(aid)->second;
 	int page = aid_info[idx][0];			// aid가 존재하는 페이지
+	int demand_frame = aid_info[idx][1];
+	// R비트 1로 바꿈 (SAMPLED LRU)
+	for (int i = page; i < page + demand_frame; i++) {
+		page_table_R[pid][i] = 1;
+	}
 
 	// ACCESS 성공
 	if (aid_info[idx][2] == 1) {
-		// LRU 큐에서 aid를 다시 맨 뒤로 삽입
+		// LRU 큐에서 aid를 다시 맨 뒤로 삽입 (LRU)
 		deque<int>::iterator iter;
 		for (iter = LRUQ.begin(); *iter != aid; iter++);
 		LRUQ.erase(iter);
@@ -109,8 +132,8 @@ int MemoryAccess(int pid, int aid, int replPolicy)
 		return 1;
 	}
 	// ACCESS 실패, PAGE FAULT 발생
+	page_fault++;
 	// 할당 가능 프레임이 있는지 확인
-	int demand_frame = aid_info[idx][1];
 	int available_frame = 0;
 	int frame = 0;
 	for (int i = 0; i < 32; i++) {
@@ -129,9 +152,9 @@ int MemoryAccess(int pid, int aid, int replPolicy)
 			// aid info 수정
 			aid_info[idx][2] = 1;
 			aid_info[idx][3] = frame;
-			// FIFO 큐에 aid 삽입
+			// FIFO 큐에 aid 삽입 (FIFO)
 			FIFOQ.push(aid);
-			// LRU 큐에 aid 삽입
+			// LRU 큐에 aid 삽입 (LRU)
 			LRUQ.push_back(aid);
 			for (int i = page, j = frame; i < page + demand_frame; i++, j++) {
 				page_table_valid[pid][i] = 1;
@@ -168,7 +191,29 @@ int ReleaseFrame(int replPolicy)
 		released_aid = LRUQ.front();
 		LRUQ.pop_front();
 	}
+	// CASE 2: SAMPLED LRU
+	else if (replPolicy == 2) {
+		printf("released_aid 진입\n");
+		// aid가 작은 것부터 차례로 reference byte 비교, 가장 작은 것을 교체
+		map<int, int>::iterator iter;
+		int smallest_aid;
+		unsigned char smallest_reference = 0b11111111;
+		for (iter = aid_idx.begin(); iter != aid_idx.end(); iter++) {
+			int idx = iter->second;
+			// valid한 aid 중에서만 선택
+			if (!aid_info[idx][2]) { continue; }
+			unsigned char reference = reference_byte[aid_info[idx][4]][aid_info[idx][0]];
+			if (reference < smallest_reference) {
+				smallest_aid = iter->first;
+				smallest_reference = reference;
+			}
+		}
+		released_aid = smallest_aid;
+		printf("released_aid 탈출\n");
+		printf("released_aid : %d\n", released_aid);
+	}
 
+	printf("table 수정 진입\n");
 	// physical memeory에서 할당 해제, page table 수정
 	int idx = aid_idx.find(released_aid)->second;
 	int page = aid_info[idx][0];
@@ -185,6 +230,25 @@ int ReleaseFrame(int replPolicy)
 	aid_info[idx][3] = -1;		// frame No.
 								//디버그 출력
 	printf("==Released== (AID : %d)\n", released_aid);
+
+	return 0;
+}
+
+int UpdateReference(void)
+{
+	printf("UPDATE REFERENCE\n");
+	int total_process = page_table_R.size();
+	// reference byte를 오른쪽으로 1비트씩 옮기고 R 비트에 따라 0, 1을 왼쪽에 채움
+	// reference bit를 모두 0으로 clear
+	for (int pid = 0; pid < total_process; pid++) {
+		for (int i = 0; i < 64; i++) {
+			reference_byte[pid][i] >> 1;
+			if (page_table_R[pid][i]) {
+				page_table_R[pid][i] = 0;
+				reference_byte[pid][i] += 0b1000000;
+			}
+		}
+	}
 
 	return 0;
 }
@@ -221,6 +285,15 @@ void PrintResult(int pid, int func, int aid, int demand_page, int total_process)
 			else { printf("%d", page_table_valid[pid][i]); }
 		}
 		printf("|\n");
+		/**********debug****************/
+		printf(">> pid(%d) %-20s", pid, "Page Table(R) : ");
+		for (int i = 0; i < 64; i++) {
+			if (i % 4 == 0) { printf("|"); }
+			page_table_R[pid][i] ? printf("1") : printf("0");
+		}
+		printf("|\n");
+		/*******************************/
 	}
+
 	printf("\n");
 }
