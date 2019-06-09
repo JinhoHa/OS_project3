@@ -19,7 +19,7 @@ vector<vector<int>> page_table_valid;
 vector<vector<bool>> page_table_R;
 vector<vector<unsigned char>> reference_byte;
 map<int, int> aid_idx;					// pair(aid, idx)
-vector<vector<int>> aid_info;			// [0]: page, [1]: demand_page, [2]: valid, [3]: demand_frame, [4]: pid, [5]: frame
+vector<vector<int>> aid_info;			// [0]: page, [1]: demand_page, [2]: valid, [3]: demand_frame, [4]: pid, [5]: frame, [6]: count
 queue<int> FIFOQ;						// used for FIFO policy
 deque<int> LRUQ;						// used for LRU policy
 int page_fault = 0;
@@ -108,7 +108,7 @@ int PageTableAlloc(int pid, int aid, int demand_page)
 	// aid_idx를 통해 aid -> idx 변환후 aid_info[idx]를 통해 정보확인
 	int idx = aid_idx.size();
 	aid_idx.insert(pair<int, int>(aid, idx));
-	vector<int> v = { page, demand_page, 0, demand_frame, pid, -1 };
+	vector<int> v = { page, demand_page, 0, demand_frame, pid, -1, 0 };
 	aid_info.push_back(v);
 
 	return 0;
@@ -124,6 +124,8 @@ int MemoryAccess(int pid, int aid, int replPolicy)
 	for (int i = page; i < page + demand_page; i++) {
 		page_table_R[pid][i] = 1;
 	}
+	// COUNT 증가 (LFU, MFU)
+	aid_info[idx][6] += 1;
 
 	// ACCESS 성공
 	if (aid_info[idx][2] == 1) {
@@ -186,7 +188,7 @@ int MemoryAccess(int pid, int aid, int replPolicy)
 
 int ReleaseFrame(int replPolicy)
 {
-	int released_aid;
+	int released_aid;	// 교체할 aid
 	// CASE 0: FIFO
 	if (replPolicy == 0) {
 		// 할당 해제 할 aid를 FIFO 큐에서 꺼냄
@@ -220,6 +222,40 @@ int ReleaseFrame(int replPolicy)
 		printf("released_aid 탈출\n");
 		printf("released_aid : %d\n", released_aid);
 	}
+	// CASE 3: LFU
+	else if (replPolicy == 3) {
+		// aid가 작은 것부터 차례로 count 비교, 가장 작은 것을 교체
+		map<int, int>::iterator iter;
+		int least_aid;
+		int least_count = 987654321;
+		int count;
+		for (iter = aid_idx.begin(); iter != aid_idx.end(); iter++) {
+			int idx = iter->second;
+			if (!aid_info[idx][2]) { continue; }
+			count = aid_info[idx][6];
+			if (count < least_count) {
+				least_aid = iter->first;
+				least_count = count;
+			}
+		}
+		released_aid = least_aid;
+	}
+	else if (replPolicy == 4) {
+		map<int, int>::iterator iter;
+		int most_aid;
+		int most_count = -1;
+		int count;
+		for (iter = aid_idx.begin(); iter != aid_idx.end(); iter++) {
+			int idx = iter->second;
+			if (!aid_info[idx][2]) { continue; }
+			count = aid_info[idx][6];
+			if (count > most_count) {
+				most_aid = iter->first;
+				most_count = count;
+			}
+		}
+		released_aid = most_aid;
+	}
 
 	printf("table 수정 진입\n");
 	// physical memeory에서 할당 해제, page table 수정
@@ -238,7 +274,9 @@ int ReleaseFrame(int replPolicy)
 	// 해제한 aid_info 수정
 	aid_info[idx][2] = 0;		// invalid
 	aid_info[idx][5] = -1;		// frame No.
-								//디버그 출력
+	// COUNT 초기화 (LFU, MFU)
+	aid_info[idx][6] = 0;
+	//디버그 출력
 	printf("==Released== (AID : %d)\n", released_aid);
 
 	return 0;
