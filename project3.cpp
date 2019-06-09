@@ -16,11 +16,10 @@ void PrintResult(int pid, int func, int aid, int demand_page, int total_process)
 vector<int> physical_memory(32, -1);	// 물리메모리 32개 프레임
 vector<vector<int>> page_table_aid;
 vector<vector<int>> page_table_valid;
-vector<vector<int>> page_table_frame;
 vector<vector<bool>> page_table_R;
 vector<vector<unsigned char>> reference_byte;
 map<int, int> aid_idx;					// pair(aid, idx)
-vector<vector<int>> aid_info;			// [0]: page, [1]: demand_page, [2]: valid, [3]: frame, [4]: pid
+vector<vector<int>> aid_info;			// [0]: page, [1]: demand_page, [2]: valid, [3]: demand_frame, [4]: pid, [5]: frame
 queue<int> FIFOQ;						// used for FIFO policy
 deque<int> LRUQ;						// used for LRU policy
 int page_fault = 0;
@@ -39,7 +38,6 @@ int main()
 	// 가상메모리 프로세스별 각 64개 페이지
 	page_table_aid.assign(total_process, vector<int>(64, -1));
 	page_table_valid.assign(total_process, vector<int>(64, -1));
-	page_table_frame.assign(total_process, vector<int>(64, -1));
 	page_table_R.assign(total_process, vector<bool>(64, 0));
 	reference_byte.assign(total_process, vector<unsigned char>(64, 0));
 
@@ -95,16 +93,22 @@ int PageTableAlloc(int pid, int aid, int demand_page)
 			break;
 		}
 		// page table에 연속할당 불가능한 경우 -1 리턴
-		if (i == 63) return -1;
+		if (i == 63) { return -1; }
 	}
 	// 연속된 페이지에 할당
 	for (int i = page; i < page + demand_page; i++) {
 		page_table_aid[pid][i] = aid;
 		page_table_valid[pid][i] = 0;
 	}
+	// demand frame 계산
+	int demand_frame = 32;
+	while (demand_page <= (demand_frame / 2)) {
+		demand_frame /= 2;
+	}
+	// aid_idx를 통해 aid -> idx 변환후 aid_info[idx]를 통해 정보확인
 	int idx = aid_idx.size();
 	aid_idx.insert(pair<int, int>(aid, idx));
-	vector<int> v = { page, demand_page, 0, -1, pid };
+	vector<int> v = { page, demand_page, 0, demand_frame, pid, -1 };
 	aid_info.push_back(v);
 
 	return 0;
@@ -114,9 +118,10 @@ int MemoryAccess(int pid, int aid, int replPolicy)
 {
 	int idx = aid_idx.find(aid)->second;
 	int page = aid_info[idx][0];			// aid가 존재하는 페이지
-	int demand_frame = aid_info[idx][1];
+	int demand_page = aid_info[idx][1];
+	int demand_frame = aid_info[idx][3];
 	// R비트 1로 바꿈 (SAMPLED LRU)
-	for (int i = page; i < page + demand_frame; i++) {
+	for (int i = page; i < page + demand_page; i++) {
 		page_table_R[pid][i] = 1;
 	}
 
@@ -144,6 +149,7 @@ int MemoryAccess(int pid, int aid, int replPolicy)
 		// i프레임에 할당 불가능
 		else {
 			available_frame = 0;
+			i = frame + demand_frame - 1;
 			frame = i + 1;
 		}
 		// 프레임에 연속 할당 가능, 프레임 할당
@@ -151,15 +157,17 @@ int MemoryAccess(int pid, int aid, int replPolicy)
 			// 할당작업
 			// aid info 수정
 			aid_info[idx][2] = 1;
-			aid_info[idx][3] = frame;
+			aid_info[idx][5] = frame;
 			// FIFO 큐에 aid 삽입 (FIFO)
 			FIFOQ.push(aid);
 			// LRU 큐에 aid 삽입 (LRU)
 			LRUQ.push_back(aid);
-			for (int i = page, j = frame; i < page + demand_frame; i++, j++) {
+			// 페이지 테이블, 피지컬 메모리 수정
+			for (int i = page; i < page + demand_page; i++) {
 				page_table_valid[pid][i] = 1;
-				page_table_frame[pid][i] = j;
-				physical_memory[j] = aid;
+			}
+			for (int i = frame; i < frame + demand_frame; i++) {
+				physical_memory[i] = aid;
 			}
 			break;
 		}
@@ -218,16 +226,18 @@ int ReleaseFrame(int replPolicy)
 	int idx = aid_idx.find(released_aid)->second;
 	int page = aid_info[idx][0];
 	int demand_page = aid_info[idx][1];
-	int frame = aid_info[idx][3];
+	int demand_frame = aid_info[idx][3];
 	int pid = aid_info[idx][4];
-	for (int i = page, j = frame; i < page + demand_page; i++, j++) {
-		//page_table_frame[pid][i] = -1;
+	int frame = aid_info[idx][5];
+	for (int i = page; i < page + demand_page; i++) {
 		page_table_valid[pid][i] = 0;
-		physical_memory[j] = -1;
+	}
+	for (int i = frame; i < frame + demand_frame; i++) {
+		physical_memory[i] = -1;
 	}
 	// 해제한 aid_info 수정
 	aid_info[idx][2] = 0;		// invalid
-	aid_info[idx][3] = -1;		// frame No.
+	aid_info[idx][5] = -1;		// frame No.
 								//디버그 출력
 	printf("==Released== (AID : %d)\n", released_aid);
 
