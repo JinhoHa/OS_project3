@@ -25,7 +25,7 @@ vector<vector<int>> aid_info;			// [0]: page, [1]: demand_page, [2]: valid, [3]:
 queue<int> FIFOQ;						// used for FIFO policy
 deque<int> LRUQ;						// used for LRU policy
 int page_fault = 0;
-int time_interval;
+int time_interval;						// used for SAMPLED LRU
 int current_instruction;
 
 int main()
@@ -61,7 +61,6 @@ int main()
 	for (int i = 0; i < N; i++) {
 		current_instruction = i;
 		time_interval--;
-		printf("time interval : %d\n", time_interval);
 		// 명령어 8개 실행마다 update reference byte & clear reference bit
 		if (time_interval == 7) {
 			UpdateReference();
@@ -152,8 +151,6 @@ int MemoryAccess(int pid, int aid, int replPolicy)
 		for (iter = LRUQ.begin(); *iter != aid; iter++);
 		LRUQ.erase(iter);
 		LRUQ.push_back(aid);
-		// aid ACCESS count 증가 코드 넣어야함
-		printf("ACCESS 성공\n");
 		return 1;
 	}
 	// ACCESS 실패, PAGE FAULT 발생
@@ -221,7 +218,6 @@ int ReleaseFrame(int replPolicy)
 	}
 	// CASE 2: SAMPLED LRU
 	else if (replPolicy == 2) {
-		printf("released_aid 진입\n");
 		// aid가 작은 것부터 차례로 reference byte 비교, 가장 작은 것을 교체
 		map<int, int>::iterator iter;
 		int smallest_aid;
@@ -237,8 +233,6 @@ int ReleaseFrame(int replPolicy)
 			}
 		}
 		released_aid = smallest_aid;
-		printf("released_aid 탈출\n");
-		printf("released_aid : %d\n", released_aid);
 	}
 	// CASE 3: LFU
 	else if (replPolicy == 3) {
@@ -285,7 +279,6 @@ int ReleaseFrame(int replPolicy)
 			}
 		}
 		for (iter = valid_aid_set.begin(); iter != valid_aid_set.end(); iter++) {
-			printf("valid aid : %d\n", *iter);
 		}
 		// 다음에 사용될 aid를 순서대로 set에서 제거
 		// set에 하나만 남거나, 마지막 instruction에 도달할 때까지 반복
@@ -304,7 +297,6 @@ int ReleaseFrame(int replPolicy)
 		valid_aid_set.clear();
 	}
 
-	printf("table 수정 진입\n");
 	// physical memeory에서 할당 해제, page table 수정
 	int idx = aid_idx.find(released_aid)->second;
 	int page = aid_info[idx][0];
@@ -323,15 +315,12 @@ int ReleaseFrame(int replPolicy)
 	aid_info[idx][5] = -1;		// frame No.
 	// COUNT 초기화 (LFU, MFU)
 	aid_info[idx][6] = 0;
-	//디버그 출력
-	printf("==Released== (AID : %d)\n", released_aid);
 
 	return 0;
 }
 
 int UpdateReference(void)
 {
-	printf("UPDATE REFERENCE\n");
 	int total_process = page_table_R.size();
 	// reference byte를 오른쪽으로 1비트씩 옮기고 R 비트에 따라 0, 1을 왼쪽에 채움
 	// reference bit를 모두 0으로 clear
@@ -380,15 +369,6 @@ void PrintResult(int pid, int func, int aid, int demand_page, int total_process)
 			else { printf("%d", page_table_valid[pid][i]); }
 		}
 		printf("|\n");
-		/**********debug****************/
-		printf(">> pid(%d) %-20s", pid, "Page Table(R) : ");
-		for (int i = 0; i < 64; i++) {
-			if (i % 4 == 0) { printf("|"); }
-			page_table_R[pid][i] ? printf("1") : printf("0");
-		}
-		printf("|\n");
-		/*******************************/
 	}
-
 	printf("\n");
 }
