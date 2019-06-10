@@ -5,6 +5,7 @@
 #include <map>
 #include <queue>
 #include <deque>
+#include <set>
 using namespace std;
 
 int PageTableAlloc(int pid, int aid, int demand_page);
@@ -25,6 +26,7 @@ queue<int> FIFOQ;						// used for FIFO policy
 deque<int> LRUQ;						// used for LRU policy
 int page_fault = 0;
 int time_interval;
+int current_instruction;
 
 int main()
 {
@@ -57,6 +59,7 @@ int main()
 	time_interval = 8;
 	// 명령어 N번 수행
 	for (int i = 0; i < N; i++) {
+		current_instruction = i;
 		time_interval--;
 		printf("time interval : %d\n", time_interval);
 		// 명령어 8개 실행마다 update reference byte & clear reference bit
@@ -270,6 +273,35 @@ int ReleaseFrame(int replPolicy)
 			}
 		}
 		released_aid = most_aid;
+	}
+	else if (replPolicy == 5) {
+		set<int> valid_aid_set;
+		set<int>::iterator iter;
+		int aid_to_use;
+		// 현재 valid 상태인 aid를 set에 추가
+		for (int i = 0; i < 32; i++) {
+			if (physical_memory[i] != -1) {
+				valid_aid_set.insert(physical_memory[i]);
+			}
+		}
+		for (iter = valid_aid_set.begin(); iter != valid_aid_set.end(); iter++) {
+			printf("valid aid : %d\n", *iter);
+		}
+		// 다음에 사용될 aid를 순서대로 set에서 제거
+		// set에 하나만 남거나, 마지막 instruction에 도달할 때까지 반복
+		for (int i = current_instruction + 1; i < instruction.size(); i++) {
+			if (valid_aid_set.size() == 1) { break; }
+			aid_to_use = instruction[i][2];
+			iter = valid_aid_set.find(aid_to_use);
+			if (iter != valid_aid_set.end()) {
+				valid_aid_set.erase(iter);
+			}
+		}
+		// 마지막 남은 aid가 release됨
+		// 여러개 남은 경우 aid가 작은 것
+		iter = valid_aid_set.begin();
+		released_aid = *iter;
+		valid_aid_set.clear();
 	}
 
 	printf("table 수정 진입\n");
