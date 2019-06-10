@@ -13,6 +13,7 @@ int ReleaseFrame(int replPolicy);
 int UpdateReference(void);
 void PrintResult(int pid, int func, int aid, int demand_page, int total_process);
 
+vector<vector<int>> instruction;		// 명령어
 vector<int> physical_memory(32, -1);	// 물리메모리 32개 프레임
 vector<vector<int>> page_table_aid;
 vector<vector<int>> page_table_valid;
@@ -40,20 +41,35 @@ int main()
 	page_table_valid.assign(total_process, vector<int>(64, -1));
 	page_table_R.assign(total_process, vector<bool>(64, 0));
 	reference_byte.assign(total_process, vector<unsigned char>(64, 0));
+	instruction.assign(N, vector<int>(4));
+	// 명령어 입력받음
+	for (int i = 0; i < N; i++) {
+		scanf("%d %d %d", &pid, &func, &aid);
+		instruction[i][0] = pid;
+		instruction[i][1] = func;
+		instruction[i][2] = aid;
+		if (func) {
+			scanf("%d", &demand_page); 
+			instruction[i][3] = demand_page;
+		}
+	}
 
 	time_interval = 8;
 	// 명령어 N번 수행
-	while(N) {
+	for (int i = 0; i < N; i++) {
 		time_interval--;
 		printf("time interval : %d\n", time_interval);
 		// 명령어 8개 실행마다 update reference byte & clear reference bit
 		if (time_interval == 7) {
 			UpdateReference();
 		}
-		scanf("%d %d %d", &pid, &func, &aid);			// 명령어 읽음
+		// 명령어 정보
+		pid = instruction[i][0];
+		func = instruction[i][1];
+		aid = instruction[i][2];
+		demand_page = instruction[i][3];
 		// function = 1 : 페이지 테이블 할당
 		if (func) {
-			scanf("%d", &demand_page);
 			PageTableAlloc(pid, aid, demand_page);
 		}
 		// function = 0 : 메모리 접근
@@ -67,7 +83,6 @@ int main()
 		if (!time_interval) {
 			time_interval = 8;
 		}
-		N--;
 	}
 	printf("page fault = %d\n", page_fault);
 
