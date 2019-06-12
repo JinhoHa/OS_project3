@@ -252,6 +252,7 @@ int ReleaseFrame(int replPolicy)
 		}
 		released_aid = least_aid;
 	}
+	// CASE 4: MFU
 	else if (replPolicy == 4) {
 		map<int, int>::iterator iter;
 		int most_aid;
@@ -268,6 +269,7 @@ int ReleaseFrame(int replPolicy)
 		}
 		released_aid = most_aid;
 	}
+	// CASE 5: OPTIMIZED
 	else if (replPolicy == 5) {
 		set<int> valid_aid_set;
 		set<int>::iterator iter;
@@ -315,6 +317,11 @@ int ReleaseFrame(int replPolicy)
 	aid_info[idx][5] = -1;		// frame No.
 	// COUNT 초기화 (LFU, MFU)
 	aid_info[idx][6] = 0;
+	// reference, r bit 0으로 초기화
+	for (int i = page; i < page + demand_page; i++) {
+		reference_byte[pid][i] = 0;
+		page_table_R[pid][i] = 0;
+	}
 
 	return 0;
 }
